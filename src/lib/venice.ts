@@ -33,6 +33,8 @@ Guide the user through these 5 areas, in order. Move naturally between them base
 - Overgeneralization (always/never thinking)
 - Emotional reasoning (I feel it, so it must be true)
 - Filtering (only seeing the negative)
+- Labeling (attaching a fixed label)
+- Magnification/Minimization (blowing things out of proportion)
 
 ## When to Analyze
 After collecting all 5 areas, provide:
@@ -44,13 +46,11 @@ After collecting all 5 areas, provide:
 When you've gathered enough information for a field, include a hidden marker:
 [FIELD: situation] or [FIELD: emotions] or [FIELD: physical] or [FIELD: thoughts] or [FIELD: behaviors]
 
-Use these markers ONLY when you're confident you've captured that field from the conversation. This helps the app structure the data.
+Use these markers ONLY when you're confident you've captured that field from the conversation.
 
 Example: "I hear you — that meeting really threw you off. [FIELD: situation] And you mentioned feeling anxious at about 80%? [FIELD: emotions] What physical sensations came with that?"`;
 
-export async function veniceChat(
-  messages: ChatMessage[]
-): Promise<string> {
+export async function veniceChat(messages: ChatMessage[]): Promise<string> {
   const allMessages: ChatMessage[] = [
     { role: 'system', content: SYSTEM_PROMPT },
     ...messages,
@@ -63,7 +63,7 @@ export async function veniceChat(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'llama-4-maverick',
+      model: 'qwen3-5-397b-a17b',
       messages: allMessages,
       temperature: 0.7,
       max_tokens: 500,
@@ -74,13 +74,13 @@ export async function veniceChat(
   });
 
   if (!response.ok) {
-    const error = await response.text();
-    console.error('Venice chat error:', error);
+    const errorText = await response.text();
+    console.error('Venice chat error:', response.status, errorText);
     throw new Error(`Venice API error: ${response.status}`);
   }
 
   const data = await response.json();
-  return data.choices?.[0]?.message?.content || 'I\'m having trouble responding right now. Could you try again?';
+  return data.choices?.[0]?.message?.content || "I'm having trouble responding right now. Could you try again?";
 }
 
 export async function veniceTranscribe(audioBuffer: Buffer, filename: string = 'recording.webm'): Promise<string> {
@@ -131,18 +131,7 @@ export async function veniceTTS(text: string, voice: string = 'af_nicole'): Prom
   return response.arrayBuffer();
 }
 
-// Extract CBT fields from AI response markers
-export function extractFields(text: string): Record<string, string> {
-  const fields: Record<string, string> = {};
-  const fieldRegex = /\[FIELD:\s*(\w+)\]/g;
-  let match;
-  while ((match = fieldRegex.exec(text)) !== null) {
-    fields[match[1]] = match[0];
-  }
-  return fields;
-}
-
-// Parse the full conversation to extract a thought record
+// Parse the full conversation to extract thought record fields
 export function parseThoughtRecord(messages: { role: string; content: string }[]): {
   situation?: string;
   emotions?: string;
@@ -154,33 +143,29 @@ export function parseThoughtRecord(messages: { role: string; content: string }[]
   reframedThoughts?: string[];
   aiAnalysis?: string;
 } {
-  const record: any = {};
+  const record: Record<string, string | number | string[] | undefined> = {};
   
-  // Collect all user messages as the raw data
   const userMessages = messages
     .filter(m => m.role === 'user')
     .map(m => m.content)
     .join(' ');
 
-  // Collect all assistant messages for analysis
   const aiMessages = messages
     .filter(m => m.role === 'assistant')
     .map(m => m.content)
     .join(' ');
 
-  // Try to extract fields from markers
   const sitMatch = aiMessages.match(/\[FIELD:\s*situation\]/i);
   const emoMatch = aiMessages.match(/\[FIELD:\s*emotions\]/i);
   const phyMatch = aiMessages.match(/\[FIELD:\s*physical\]/i);
   const thoMatch = aiMessages.match(/\[FIELD:\s*thoughts\]/i);
   const behMatch = aiMessages.match(/\[FIELD:\s*behaviors\]/i);
 
-  // Use the conversation context - simpler approach: just capture all user input as the full context
   if (sitMatch) record.situation = userMessages;
   if (emoMatch) record.emotions = userMessages;
   if (phyMatch) record.physicalSensations = userMessages;
   if (thoMatch) record.thoughts = userMessages;
   if (behMatch) record.behaviors = userMessages;
 
-  return record;
+  return record as any;
 }
