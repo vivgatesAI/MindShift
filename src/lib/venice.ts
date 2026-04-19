@@ -49,8 +49,7 @@ Use these markers ONLY when you're confident you've captured that field from the
 Example: "I hear you — that meeting really threw you off. [FIELD: situation] And you mentioned feeling anxious at about 80%? [FIELD: emotions] What physical sensations came with that?"`;
 
 export async function veniceChat(
-  messages: ChatMessage[],
-  userId: string
+  messages: ChatMessage[]
 ): Promise<string> {
   const allMessages: ChatMessage[] = [
     { role: 'system', content: SYSTEM_PROMPT },

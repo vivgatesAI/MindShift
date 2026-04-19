@@ -1,16 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { veniceChat } from '@/lib/venice';
-import prisma from '@/lib/prisma';
+
+const VENICE_API_KEY = process.env.VENICE_API_KEY;
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, userId } = await req.json();
+    const { messages } = await req.json();
 
     if (!messages || !Array.isArray(messages)) {
       return NextResponse.json({ error: 'Messages required' }, { status: 400 });
     }
 
-    const response = await veniceChat(messages, userId || 'anonymous');
+    if (!VENICE_API_KEY) {
+      console.error('VENICE_API_KEY not set');
+      return NextResponse.json(
+        { error: 'Server configuration error: API key missing' },
+        { status: 500 }
+      );
+    }
+
+    const response = await veniceChat(messages);
 
     // Extract CBT fields from markers
     const fieldRegex = /\[FIELD:\s*(\w+)\]/gi;
@@ -27,10 +36,11 @@ export async function POST(req: NextRequest) {
       content: cleanResponse,
       fields: Object.keys(fields).length > 0 ? fields : undefined,
     });
-  } catch (error: any) {
-    console.error('Chat API error:', error);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Chat API error:', message);
     return NextResponse.json(
-      { error: 'Failed to get response', details: error.message },
+      { error: 'Failed to get response', details: message },
       { status: 500 }
     );
   }
