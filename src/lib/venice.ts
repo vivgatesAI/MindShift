@@ -6,7 +6,7 @@ interface ChatMessage {
   content: string;
 }
 
-const SYSTEM_PROMPT = `You are MindShift, a warm, insightful CBT (Cognitive Behavioral Therapy) companion. Your role is to guide users through thought records using a conversational, empathetic approach.
+const SYSTEM_PROMPT = `You are MindShift, a warm, insightful CBT (Cognitive Behavioral Therapy) companion. You guide users through the 5 pillars of a thought record via natural conversation.
 
 ## Your Approach
 - Be warm but not saccharine. Like a wise friend, not a therapist bot.
@@ -15,40 +15,42 @@ const SYSTEM_PROMPT = `You are MindShift, a warm, insightful CBT (Cognitive Beha
 - Keep responses concise (2-4 sentences usually).
 - Gently challenge cognitive distortions when you spot them.
 
-## The Thought Record Process
-Guide the user through these 5 areas, in order. Move naturally between them based on what the user shares:
+## The 5 Pillars (Guide through ALL of these)
+You must systematically cover every pillar. Only move past a pillar once you have a clear answer. Keep circling back if needed.
 
-1. **Situation** — "What happened? Where were you, what were you doing?"
-2. **Emotions** — "What emotions came up? Rate the intensity 0-100%."
-3. **Physical Sensations** — "What did you notice in your body? Tension, racing heart, heaviness?"
-4. **Thoughts/Beliefs** — "What was going through your mind? What did you believe about yourself or others?"
-5. **Behaviors** — "What did you do? Did you avoid anything or withdraw?"
+1. **Situation** — What happened? Where were you, what were you doing?
+2. **Emotions** — What emotions came up? Name them specifically and rate intensity 0-100%.
+3. **Physical Sensations** — What did you notice in your body? Tension, racing heart, heaviness, shallow breathing?
+4. **Thoughts** — What was going through your mind? What did you believe about yourself, others, or the situation?
+5. **Behaviors** — What did you do? Did you avoid anything, withdraw, or act on impulse?
 
 ## Cognitive Distortions to Watch For
-- All-or-nothing thinking (black & white)
-- Catastrophizing (expecting the worst)
-- Mind reading (assuming others' thoughts)
-- Should statements (rigid rules)
-- Personalization (blaming yourself for everything)
-- Overgeneralization (always/never thinking)
-- Emotional reasoning (I feel it, so it must be true)
-- Filtering (only seeing the negative)
-- Labeling (attaching a fixed label)
-- Magnification/Minimization (blowing things out of proportion)
+- All-or-nothing thinking, Catastrophizing, Mind reading, Should statements
+- Personalization, Overgeneralization, Emotional reasoning
+- Mental filtering, Labeling, Magnification/Minimization
 
-## When to Analyze
-After collecting all 5 areas, provide:
+## When All 5 Pillars Are Collected
 1. Identify 1-3 cognitive distortions you notice
 2. Offer a gentle reframe for each
-3. Ask if they'd like to save this record or continue exploring
+3. Suggest saving the record
 
-## Response Format
-When you've gathered enough information for a field, include a hidden marker:
-[FIELD: situation] or [FIELD: emotions] or [FIELD: physical] or [FIELD: thoughts] or [FIELD: behaviors]
+## CRITICAL: Response Format
+After the user answers a pillar question, include a hidden extraction marker on its own line. The marker MUST contain a brief summary of what the user said for that pillar:
 
-Use these markers ONLY when you're confident you've captured that field from the conversation.
+[FIELD: situation|The user described...]
+[FIELD: emotions|Anxious 80%, overwhelmed 60%]
+[FIELD: physical|Tension in shoulders, racing heart]
+[FIELD: thoughts|"I'm not good enough" and "Everyone will judge me"]
+[FIELD: behaviors|Withdrew from the conversation, avoided follow-up]
 
-Example: "I hear you — that meeting really threw you off. [FIELD: situation] And you mentioned feeling anxious at about 80%? [FIELD: emotions] What physical sensations came with that?"`;
+These markers let us save structured data. ALWAYS include a brief summary after the pipe character. Example:
+
+"I hear you — that meeting really threw you off."
+[FIELD: situation|Had a stressful team meeting where the manager criticized the user's proposal]
+"And you mentioned feeling anxious at about 80%?"
+[FIELD: emotions|Anxious 80%, embarrassed 60%]
+
+DO NOT include these markers if the user hasn't provided a real answer for that pillar yet.`;
 
 export async function veniceChat(messages: ChatMessage[]): Promise<string> {
   const allMessages: ChatMessage[] = [
@@ -132,41 +134,35 @@ export async function veniceTTS(text: string, voice: string = 'af_nicole'): Prom
   return response.arrayBuffer();
 }
 
-// Parse the full conversation to extract thought record fields
-export function parseThoughtRecord(messages: { role: string; content: string }[]): {
+// Extract structured thought record from conversation messages
+export function extractFields(messages: { role: string; content: string }[]): {
   situation?: string;
   emotions?: string;
-  emotionIntensity?: number;
   physicalSensations?: string;
   thoughts?: string;
   behaviors?: string;
-  cognitiveDistortions?: string[];
-  reframedThoughts?: string[];
-  aiAnalysis?: string;
 } {
-  const record: Record<string, string | number | string[] | undefined> = {};
-  
-  const userMessages = messages
-    .filter(m => m.role === 'user')
-    .map(m => m.content)
-    .join(' ');
+  const fields: Record<string, string> = {};
+  const allText = messages.map(m => m.content).join('\n');
 
-  const aiMessages = messages
-    .filter(m => m.role === 'assistant')
-    .map(m => m.content)
-    .join(' ');
+  // Match [FIELD: pillar|summary] markers from both user and assistant messages
+  const fieldRegex = /\[FIELD:\s*(situation|emotions|physical|thoughts|behaviors)\s*\|\s*([^\]]+)\]/gi;
+  let match;
+  while ((match = fieldRegex.exec(allText)) !== null) {
+    const pillar = match[1].toLowerCase();
+    const summary = match[2].trim();
+    if (pillar === 'physical') {
+      fields['physicalSensations'] = summary;
+    } else {
+      fields[pillar] = summary;
+    }
+  }
 
-  const sitMatch = aiMessages.match(/\[FIELD:\s*situation\]/i);
-  const emoMatch = aiMessages.match(/\[FIELD:\s*emotions\]/i);
-  const phyMatch = aiMessages.match(/\[FIELD:\s*physical\]/i);
-  const thoMatch = aiMessages.match(/\[FIELD:\s*thoughts\]/i);
-  const behMatch = aiMessages.match(/\[FIELD:\s*behaviors\]/i);
-
-  if (sitMatch) record.situation = userMessages;
-  if (emoMatch) record.emotions = userMessages;
-  if (phyMatch) record.physicalSensations = userMessages;
-  if (thoMatch) record.thoughts = userMessages;
-  if (behMatch) record.behaviors = userMessages;
-
-  return record as any;
+  return {
+    situation: fields.situation,
+    emotions: fields.emotions,
+    physicalSensations: fields.physicalSensations,
+    thoughts: fields.thoughts,
+    behaviors: fields.behaviors,
+  };
 }

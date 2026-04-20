@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
+import { extractFields } from '@/lib/venice';
 
 // GET /api/records — List all thought records
 export async function GET() {
@@ -16,58 +17,88 @@ export async function GET() {
   }
 }
 
-// POST /api/records — Create a thought record
+// POST /api/records — Create a thought record from conversation
 export async function POST(req: NextRequest) {
   try {
-    const { messages, userId } = await req.json();
+    const { messages } = await req.json();
 
-    // For MVP, we'll use a default user or create one
+    // Get or create default user
     let user = await prisma.user.findFirst();
     if (!user) {
-      user = await prisma.user.create({
-        data: { name: 'User' },
-      });
+      user = await prisma.user.create({ data: { name: 'User' } });
     }
 
-    // Parse record from conversation using a dedicated analysis prompt
-    const analysisPrompt = `Analyze this CBT conversation and extract a structured thought record. Return ONLY valid JSON with these fields:
-- situation: string (what happened)
-- emotions: string (emotions felt, e.g. "anxious, overwhelmed")
-- emotionIntensity: number (0-100, estimated from conversation)
-- physicalSensations: string (body sensations described)
-- thoughts: string (the thoughts/beliefs expressed)
-- behaviors: string (what the person did or avoided)
-- cognitiveDistortions: string[] (list any cognitive distortions you detect, using these labels: "All-or-Nothing Thinking", "Catastrophizing", "Mind Reading", "Should Statements", "Personalization", "Overgeneralization", "Emotional Reasoning", "Mental Filtering", "Labeling", "Magnification/Minimization")
-- reframedThoughts: string[] (list healthier alternative perspectives)
-- summary: string (one sentence summary of the record)
+    // Extract fields from [FIELD: pillar|summary] markers in the conversation
+    const fields = extractFields(messages || []);
 
-If a field wasn't discussed, use null. Be empathetic but analytical.
+    // Use AI to fill in any gaps and generate analysis
+    const VENICE_API_KEY = process.env.VENICE_API_KEY;
+    let analysis = {
+      situation: fields.situation || null,
+      emotions: fields.emotions || null,
+      emotionIntensity: null as number | null,
+      physicalSensations: fields.physicalSensations || null,
+      thoughts: fields.thoughts || null,
+      behaviors: fields.behaviors || null,
+      cognitiveDistortions: [] as string[],
+      reframedThoughts: [] as string[],
+      summary: fields.situation || 'Thought Record',
+    };
 
-Conversation messages:
+    // Ask AI to analyze the conversation for distortions, reframes, and any missing fields
+    const analysisPrompt = `Analyze this CBT conversation and extract a structured thought record. Return ONLY valid JSON (no markdown, no code blocks) with these fields:
+- situation: string or null (what happened)
+- emotions: string or null (emotions felt, e.g. "anxious, overwhelmed")
+- emotionIntensity: number 0-100 or null
+- physicalSensations: string or null (body sensations)
+- thoughts: string or null (the thoughts/beliefs expressed)
+- behaviors: string or null (what the person did or avoided)
+- cognitiveDistortions: string[] (labels from: "All-or-Nothing Thinking", "Catastrophizing", "Mind Reading", "Should Statements", "Personalization", "Overgeneralization", "Emotional Reasoning", "Mental Filtering", "Labeling", "Magnification/Minimization")
+- reframedThoughts: string[] (healthier alternative perspectives for each distortion)
+- summary: string (one sentence summary)
+
+Only fill fields that the user actually discussed. Use null for fields with no information.
+
+Conversation:
 ${JSON.stringify(messages, null, 2)}`;
 
-    const VENICE_API_KEY = process.env.VENICE_API_KEY;
-    const response = await fetch('https://api.venice.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${VENICE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'llama-4-maverick',
-        messages: [{ role: 'user', content: analysisPrompt }],
-        temperature: 0.3,
-        max_tokens: 1000,
-        venice_parameters: { include_venice_system_prompt: false },
-      }),
-    });
+    try {
+      const response = await fetch('https://api.venice.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${VENICE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'google-gemma-4-31b-it',
+          messages: [{ role: 'user', content: analysisPrompt }],
+          temperature: 0.2,
+          max_tokens: 800,
+          venice_parameters: { include_venice_system_prompt: false, strip_thinking_response: true },
+        }),
+      });
 
-    const data = await response.json();
-    let analysisText = data.choices?.[0]?.message?.content || '{}';
-
-    // Extract JSON from response (handle markdown code blocks)
-    const jsonMatch = analysisText.match(/\{[\s\S]*\}/);
-    const analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+      if (response.ok) {
+        const data = await response.json();
+        const text = data.choices?.[0]?.message?.content || '{}';
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          // Merge: use conversation-extracted fields first, fall back to AI-extracted
+          analysis.situation = analysis.situation || parsed.situation || null;
+          analysis.emotions = analysis.emotions || parsed.emotions || null;
+          analysis.emotionIntensity = parsed.emotionIntensity || null;
+          analysis.physicalSensations = analysis.physicalSensations || parsed.physicalSensations || null;
+          analysis.thoughts = analysis.thoughts || parsed.thoughts || null;
+          analysis.behaviors = analysis.behaviors || parsed.behaviors || null;
+          analysis.cognitiveDistortions = Array.isArray(parsed.cognitiveDistortions) ? parsed.cognitiveDistortions : [];
+          analysis.reframedThoughts = Array.isArray(parsed.reframedThoughts) ? parsed.reframedThoughts : [];
+          analysis.summary = parsed.summary || analysis.situation || 'Thought Record';
+        }
+      }
+    } catch (err) {
+      console.error('AI analysis failed, using field extraction only:', err);
+    }
 
     // Save to database
     const record = await prisma.thoughtRecord.create({
@@ -79,30 +110,28 @@ ${JSON.stringify(messages, null, 2)}`;
         physicalSensations: analysis.physicalSensations,
         thoughts: analysis.thoughts,
         behaviors: analysis.behaviors,
-        cognitiveDistortions: analysis.cognitiveDistortions ? JSON.stringify(analysis.cognitiveDistortions) : null,
-        reframedThoughts: analysis.reframedThoughts ? JSON.stringify(analysis.reframedThoughts) : null,
-        aiAnalysis: analysisText,
+        cognitiveDistortions: JSON.stringify(analysis.cognitiveDistortions),
+        reframedThoughts: JSON.stringify(analysis.reframedThoughts),
+        aiAnalysis: JSON.stringify(analysis),
         summary: analysis.summary,
       },
     });
 
-    // Format for frontend
-    const formattedRecord = {
-      id: record.id,
-      date: record.date.toISOString(),
-      situation: record.situation,
-      emotions: record.emotions,
-      emotionIntensity: record.emotionIntensity,
-      physicalSensations: record.physicalSensations,
-      thoughts: record.thoughts,
-      behaviors: record.behaviors,
-      cognitiveDistortions: record.cognitiveDistortions ? JSON.parse(record.cognitiveDistortions) : [],
-      reframedThoughts: record.reframedThoughts ? JSON.parse(record.reframedThoughts) : [],
-      aiAnalysis: record.aiAnalysis,
-      summary: record.summary,
-    };
-
-    return NextResponse.json({ record: formattedRecord });
+    return NextResponse.json({
+      record: {
+        id: record.id,
+        date: record.date.toISOString(),
+        situation: record.situation,
+        emotions: record.emotions,
+        emotionIntensity: record.emotionIntensity,
+        physicalSensations: record.physicalSensations,
+        thoughts: record.thoughts,
+        behaviors: record.behaviors,
+        cognitiveDistortions: analysis.cognitiveDistortions,
+        reframedThoughts: analysis.reframedThoughts,
+        summary: record.summary,
+      }
+    });
   } catch (error: any) {
     console.error('Create record error:', error);
     return NextResponse.json(

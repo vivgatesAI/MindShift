@@ -5,8 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Mic, MicOff, Send, BarChart3, ArrowLeft,
   Volume2, VolumeX, BookOpen,
-  X, AlertCircle, Brain, ChevronRight,
-  Calendar, Feather
+  X, AlertCircle, Brain, ChevronRight, ChevronDown,
+  Calendar, Feather, MapPin, Heart, Hand, Lightbulb, Footprints
 } from 'lucide-react';
 
 interface Message {
@@ -42,6 +42,7 @@ export default function MindShiftApp() {
   const [records, setRecords] = useState<ThoughtRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [micSupported, setMicSupported] = useState(false);
+  const [expandedRecord, setExpandedRecord] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -253,6 +254,14 @@ export default function MindShiftApp() {
     acc[date] = acc[date] || []; acc[date].push(r); return acc;
   }, {});
 
+  const pillars = [
+    { key: 'situation', label: 'Situation', icon: MapPin, color: 'bg-bark/5 text-bark' },
+    { key: 'emotions', label: 'Emotions', icon: Heart, color: 'bg-terracotta/8 text-terracotta' },
+    { key: 'physicalSensations', label: 'Physical', icon: Hand, color: 'bg-sage/8 text-sage' },
+    { key: 'thoughts', label: 'Thoughts', icon: Lightbulb, color: 'bg-bark/8 text-warm' },
+    { key: 'behaviors', label: 'Behaviors', icon: Footprints, color: 'bg-sage/5 text-sage' },
+  ] as const;
+
   return (
     <div className="min-h-screen bg-cream flex flex-col">
       <header className="sticky top-0 z-50 bg-cream/90 backdrop-blur-sm border-b border-sand/60">
@@ -271,7 +280,7 @@ export default function MindShiftApp() {
 
       <div className="flex-1 overflow-y-auto px-4 py-6">
         <div className="max-w-2xl mx-auto">
-          {/* Stats — clean, no gradient text */}
+          {/* Stats */}
           <div className="grid grid-cols-3 gap-4 mb-10">
             <div className="bg-white border border-sand rounded-xl p-5">
               <div className="text-3xl font-display text-bark">{records.length}</div>
@@ -306,29 +315,98 @@ export default function MindShiftApp() {
                     <Calendar size={13} className="text-warm/40" />
                     <span className="text-xs text-warm/50 font-medium">{date}</span>
                   </div>
-                  <div className="space-y-2">
-                    {recs.map(record => (
-                      <button key={record.id}
-                        className="w-full bg-white border border-sand rounded-xl p-4 text-left hover:border-sage/40 transition-colors group">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm text-bark truncate">{record.summary || record.situation || 'Thought Record'}</p>
-                            {record.emotions && <p className="text-xs text-warm/50 mt-1 truncate">{record.emotions}</p>}
-                          </div>
-                          <div className="flex items-center gap-1 text-warm/20 group-hover:text-sage transition-colors shrink-0">
-                            <span className="text-[11px]">{new Date(record.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                            <ChevronRight size={14} />
-                          </div>
+                  <div className="space-y-3">
+                    {recs.map(record => {
+                      const isExpanded = expandedRecord === record.id;
+                      const filledCount = pillars.filter(p => (record as any)[p.key]).length;
+                      return (
+                        <div key={record.id}
+                          className="bg-white border border-sand rounded-xl overflow-hidden">
+                          {/* Card header */}
+                          <button
+                            onClick={() => setExpandedRecord(isExpanded ? null : record.id)}
+                            className="w-full p-4 text-left hover:bg-sand/20 transition-colors">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm text-bark line-clamp-2">{record.summary || record.situation || 'Thought Record'}</p>
+                                <div className="flex items-center gap-2 mt-1.5">
+                                  <span className="text-[11px] text-warm/50">{new Date(record.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                  <span className="text-[11px] text-warm/30">·</span>
+                                  <span className="text-[11px] text-sage">{filledCount}/5 pillars</span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                {record.cognitiveDistortions && record.cognitiveDistortions.length > 0 && (
+                                  <span className="px-2 py-0.5 text-[10px] rounded-full bg-terracotta/10 text-terracotta border border-terracotta/15">
+                                    {record.cognitiveDistortions.length} distortion{record.cognitiveDistortions.length > 1 ? 's' : ''}
+                                  </span>
+                                )}
+                                <ChevronDown size={16} className={`text-warm/30 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                              </div>
+                            </div>
+                          </button>
+
+                          {/* Expanded 5-pillar detail */}
+                          {isExpanded && (
+                            <div className="border-t border-sand/40">
+                              {pillars.map(pillar => {
+                                const value = (record as any)[pillar.key] as string | undefined;
+                                const IconComp = pillar.icon;
+                                return (
+                                  <div key={pillar.key} className="flex gap-3 px-4 py-3 border-b border-sand/20 last:border-b-0">
+                                    <div className={`shrink-0 w-7 h-7 rounded-lg ${pillar.color} flex items-center justify-center`}>
+                                      <IconComp size={14} />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="text-[11px] font-medium text-warm/60 uppercase tracking-wider">{pillar.label}</div>
+                                      <div className="text-sm text-bark mt-0.5">
+                                        {value || <span className="text-warm/30 italic">Not captured</span>}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+
+                              {/* Distortions & Reframes */}
+                              {record.cognitiveDistortions && record.cognitiveDistortions.length > 0 && (
+                                <div className="px-4 py-3 border-t border-sand/20">
+                                  <div className="text-[11px] font-medium text-warm/60 uppercase tracking-wider mb-2">Distortions Detected</div>
+                                  <div className="flex gap-1.5 flex-wrap">
+                                    {record.cognitiveDistortions.map((d, i) => (
+                                      <span key={i} className="px-2.5 py-1 text-[11px] rounded-lg bg-terracotta/8 text-terracotta border border-terracotta/15">{d}</span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {record.reframedThoughts && record.reframedThoughts.length > 0 && (
+                                <div className="px-4 py-3 border-t border-sand/20">
+                                  <div className="text-[11px] font-medium text-warm/60 uppercase tracking-wider mb-2">Reframes</div>
+                                  <ul className="space-y-1">
+                                    {record.reframedThoughts.map((r, i) => (
+                                      <li key={i} className="text-sm text-sage flex items-start gap-2">
+                                        <span className="text-sage/50 mt-1 shrink-0">✦</span>
+                                        <span>{r}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                              {record.emotionIntensity != null && (
+                                <div className="px-4 py-3 border-t border-sand/20">
+                                  <div className="text-[11px] font-medium text-warm/60 uppercase tracking-wider mb-1.5">Emotion Intensity</div>
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex-1 h-2 bg-sand/40 rounded-full overflow-hidden">
+                                      <div className="h-full bg-terracotta rounded-full" style={{ width: `${record.emotionIntensity}%` }} />
+                                    </div>
+                                    <span className="text-sm font-medium text-bark">{record.emotionIntensity}%</span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
-                        {record.cognitiveDistortions && record.cognitiveDistortions.length > 0 && (
-                          <div className="flex gap-1.5 mt-2 flex-wrap">
-                            {record.cognitiveDistortions.slice(0, 3).map((d, i) => (
-                              <span key={i} className="px-2 py-0.5 text-[10px] rounded-full bg-sage/10 text-sage border border-sage/15">{d}</span>
-                            ))}
-                          </div>
-                        )}
-                      </button>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               ))}
