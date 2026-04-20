@@ -8,8 +8,8 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        display: ['Instrument Serif', 'Georgia', 'serif'],
-        body: ['DM Sans', 'system-ui', 'sans-serif'],
+        display: ['Spectral', 'Georgia', 'serif'],
+        body: ['Karla', 'system-ui', 'sans-serif'],
       },
       colors: {
         cream: '#f8f6f3',
