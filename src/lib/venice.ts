@@ -63,7 +63,7 @@ export async function veniceChat(messages: ChatMessage[]): Promise<string> {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'qwen3-5-397b-a17b',
+      model: 'google-gemma-4-31b-it',
       messages: allMessages,
       temperature: 0.7,
       max_tokens: 500,
