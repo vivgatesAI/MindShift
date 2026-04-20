@@ -21,20 +21,17 @@ export async function POST(req: NextRequest) {
 
     const response = await veniceChat(messages);
 
-    // Extract CBT fields from markers
-    const fieldRegex = /\[FIELD:\s*(\w+)\]/gi;
-    const fields: Record<string, string> = {};
-    let match;
-    while ((match = fieldRegex.exec(response)) !== null) {
-      fields[match[1].toLowerCase()] = 'detected';
+    if (!response || response.trim().length === 0) {
+      return NextResponse.json({
+        content: "I'm here. Could you say that again? Sometimes I need a second try.",
+      });
     }
 
-    // Clean the response of markers for display
-    const cleanResponse = response.replace(/\[FIELD:\s*\w+\]/gi, '').trim();
+    // Clean the response of field markers for display
+    const cleanResponse = response.replace(/\[FIELD:[^\]]+\]/gi, '').trim();
 
     return NextResponse.json({
-      content: cleanResponse,
-      fields: Object.keys(fields).length > 0 ? fields : undefined,
+      content: cleanResponse || "I'm here. Could you say that again?",
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';

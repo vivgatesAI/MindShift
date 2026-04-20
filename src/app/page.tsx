@@ -62,6 +62,7 @@ export default function MindShiftApp() {
   const [isLoading, setIsLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [records, setRecords] = useState<ThoughtRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [micSupported, setMicSupported] = useState(false);
@@ -113,8 +114,8 @@ export default function MindShiftApp() {
       if (ttsEnabled && assistantMsg.content) {
         try {
           const ttsRes = await fetch('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: assistantMsg.content }) });
-          if (ttsRes.ok) { const audioBlob = await ttsRes.arrayBuffer(); const audioUrl = URL.createObjectURL(new Blob([audioBlob], { type: 'audio/mp3' })); if (currentAudioRef.current) currentAudioRef.current.pause(); currentAudioRef.current = new Audio(audioUrl); currentAudioRef.current.play().catch(() => {}); }
-        } catch {}
+          if (ttsRes.ok) { const audioBlob = await ttsRes.arrayBuffer(); const audioUrl = URL.createObjectURL(new Blob([audioBlob], { type: 'audio/mp3' })); if (currentAudioRef.current) currentAudioRef.current.pause(); currentAudioRef.current = new Audio(audioUrl); setIsSpeaking(true); currentAudioRef.current.onended = () => setIsSpeaking(false); currentAudioRef.current.onerror = () => setIsSpeaking(false); currentAudioRef.current.play().catch(() => setIsSpeaking(false)); }
+        } catch { /* TTS failed silently */ }
       }
     } catch (err: unknown) { setError(err instanceof Error ? err.message : 'Something went wrong'); }
     finally { setIsLoading(false); }
@@ -234,6 +235,14 @@ export default function MindShiftApp() {
                 <Feather size={14} className="text-cream" />
               </div>
               <span className="font-display text-lg text-bark">MindShift</span>
+              {isSpeaking && (
+                <div className="flex items-center gap-0.5 ml-1">
+                  <span className="w-0.5 h-2 bg-sage rounded-full" style={{ animation: 'sound-wave 0.6s ease-in-out infinite', animationDelay: '0ms' }} />
+                  <span className="w-0.5 h-3 bg-sage rounded-full" style={{ animation: 'sound-wave 0.6s ease-in-out infinite', animationDelay: '150ms' }} />
+                  <span className="w-0.5 h-2.5 bg-sage rounded-full" style={{ animation: 'sound-wave 0.6s ease-in-out infinite', animationDelay: '300ms' }} />
+                  <span className="w-0.5 h-1.5 bg-sage rounded-full" style={{ animation: 'sound-wave 0.6s ease-in-out infinite', animationDelay: '100ms' }} />
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-1">
               <button onClick={() => setTtsEnabled(!ttsEnabled)} className="p-2 rounded-lg hover:bg-sand/40 text-warm hover:text-bark transition-colors" title={ttsEnabled ? 'Mute AI voice' : 'Enable AI voice'}>
@@ -282,7 +291,7 @@ export default function MindShiftApp() {
                   <div className="px-4 py-1.5 rounded-full bg-sage/10 text-sage text-xs font-medium">{msg.content}</div>
                 ) : msg.role === 'assistant' ? (
                   <div className="max-w-[80%]">
-                    <div className="text-[11px] text-warm/60 mb-1 ml-0.5">MindShift</div>
+                    <div className="text-[11px] text-warm/60 mb-1 ml-0.5 flex items-center gap-1.5">MindShift{isSpeaking && <span className="text-sage text-[10px]">· Speaking</span>}</div>
                     <div className="bg-white border border-sand/60 rounded-2xl rounded-tl-sm px-4 py-3">
                       <div className="whitespace-pre-wrap text-sm leading-relaxed text-bark/85">{msg.content.replace(/\[FIELD:[^\]]+\]/gi, '')}</div>
                     </div>

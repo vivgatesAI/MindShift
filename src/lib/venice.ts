@@ -118,10 +118,10 @@ export async function veniceTTS(text: string, voice: string = 'ara'): Promise<Ar
     },
     body: JSON.stringify({
       model: 'tts-xai-v1',
-      text: text,
-      voice_id: voice,
-      language: 'en',
-      output_format: { codec: 'mp3', sample_rate: 24000, bit_rate: 128000 },
+      input: text,
+      voice: voice,
+      response_format: 'mp3',
+      speed: 1.0,
     }),
   });
 
