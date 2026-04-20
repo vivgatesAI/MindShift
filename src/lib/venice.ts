@@ -69,6 +69,7 @@ export async function veniceChat(messages: ChatMessage[]): Promise<string> {
       max_tokens: 500,
       venice_parameters: {
         include_venice_system_prompt: false,
+        strip_thinking_response: true,
       },
     }),
   });
