@@ -1,3 +1,5 @@
+import './globals.css';
+
 export const metadata = {
   title: 'MindShift — AI-Powered CBT Thought Records',
   description: 'Track your thoughts, identify cognitive distortions, and reframe your thinking with AI-guided CBT therapy.',
