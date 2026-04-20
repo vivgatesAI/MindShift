@@ -5,10 +5,16 @@ import { extractFields } from '@/lib/venice';
 // GET /api/records — List all thought records
 export async function GET() {
   try {
-    const records = await prisma.thoughtRecord.findMany({
+    const rawRecords = await prisma.thoughtRecord.findMany({
       orderBy: { date: 'desc' },
       take: 100,
     });
+    // Parse JSON string fields for the frontend
+    const records = rawRecords.map(r => ({
+      ...r,
+      cognitiveDistortions: r.cognitiveDistortions ? JSON.parse(r.cognitiveDistortions) : [],
+      reframedThoughts: r.reframedThoughts ? JSON.parse(r.reframedThoughts) : [],
+    }));
     return NextResponse.json({ records });
   } catch (error: any) {
     console.error('Get records error:', error);

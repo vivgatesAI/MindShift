@@ -109,7 +109,7 @@ export async function veniceTranscribe(audioBuffer: Buffer, filename: string = '
   return data.text || '';
 }
 
-export async function veniceTTS(text: string, voice: string = 'af_nicole'): Promise<ArrayBuffer> {
+export async function veniceTTS(text: string, voice: string = 'ara'): Promise<ArrayBuffer> {
   const response = await fetch(`${VENICE_BASE}/audio/speech`, {
     method: 'POST',
     headers: {
@@ -118,10 +118,10 @@ export async function veniceTTS(text: string, voice: string = 'af_nicole'): Prom
     },
     body: JSON.stringify({
       model: 'tts-xai-v1',
-      input: text,
-      voice: voice,
-      response_format: 'mp3',
-      speed: 1.0,
+      text: text,
+      voice_id: voice,
+      language: 'en',
+      output_format: { codec: 'mp3', sample_rate: 24000, bit_rate: 128000 },
     }),
   });
 

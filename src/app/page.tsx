@@ -30,6 +30,21 @@ interface ThoughtRecord {
   summary?: string;
 }
 
+// Safely parse JSON string fields from the API
+function parseArray(val: string[] | string | null | undefined): string[] {
+  if (Array.isArray(val)) return val;
+  if (typeof val === 'string') { try { const parsed = JSON.parse(val); return Array.isArray(parsed) ? parsed : []; } catch { return []; } }
+  return [];
+}
+
+function normalizeRecord(r: any): ThoughtRecord {
+  return {
+    ...r,
+    cognitiveDistortions: parseArray(r.cognitiveDistortions),
+    reframedThoughts: parseArray(r.reframedThoughts),
+  };
+}
+
 type View = 'start' | 'chat' | 'dashboard';
 
 const PILLARS = [
@@ -135,7 +150,7 @@ export default function MindShiftApp() {
       const res = await fetch('/api/records', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: messages.map(m => ({ role: m.role, content: m.content })) }) });
       const data = await res.json();
       if (data.record) {
-        setRecords(prev => [data.record, ...prev]);
+        setRecords(prev => [normalizeRecord(data.record), ...prev]);
         setMessages(prev => [...prev, { id: `s-${Date.now()}`, role: 'system', content: '✦ Saved to your journal.', timestamp: new Date() }]);
       }
     } catch { setError('Failed to save.'); }
@@ -161,7 +176,7 @@ export default function MindShiftApp() {
   }, []);
 
   useEffect(() => {
-    if (view === 'dashboard') { fetch('/api/records').then(r => r.json()).then(d => setRecords(d.records || [])).catch(() => {}); }
+    if (view === 'dashboard') { fetch('/api/records').then(r => r.json()).then(d => setRecords((d.records || []).map(normalizeRecord))).catch(() => {}); }
   }, [view]);
 
   const filledPillars = PILLARS.filter(p => capturedPillars[p.key]).length;
@@ -286,9 +301,22 @@ export default function MindShiftApp() {
             {isLoading && (
               <div className="flex justify-start">
                 <div className="bg-white border border-sand/60 rounded-2xl px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <div className="flex gap-1"><span className="w-1.5 h-1.5 rounded-full bg-warm/50 animate-bounce" style={{ animationDelay: '0ms' }} /><span className="w-1.5 h-1.5 rounded-full bg-warm/50 animate-bounce" style={{ animationDelay: '140ms' }} /><span className="w-1.5 h-1.5 rounded-full bg-warm/50 animate-bounce" style={{ animationDelay: '280ms' }} /></div>
-                    <span className="text-xs text-warm/40">Listening...</span>
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-lg bg-sage/10 flex items-center justify-center">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-sage animate-pulse">
+                        <path d="M12 2a5 5 0 0 1 5 5c0 2.76-2.24 5-5 5s-5-2.24-5-5a5 5 0 0 1 5-5z"/>
+                        <path d="M12 7v.01"/>
+                        <path d="M9.5 12.5c-1.5 1-2.5 2.5-2.5 4.5 0 2.76 2.24 5 5 5s5-2.24 5-5c0-2-1-3.5-2.5-4.5"/>
+                      </svg>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs text-warm/50">Thinking...</span>
+                      <div className="flex gap-1">
+                        <span className="w-1 h-1 rounded-full bg-sage/50 animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <span className="w-1 h-1 rounded-full bg-sage/50 animate-bounce" style={{ animationDelay: '140ms' }} />
+                        <span className="w-1 h-1 rounded-full bg-sage/50 animate-bounce" style={{ animationDelay: '280ms' }} />
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

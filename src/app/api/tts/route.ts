@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Text required' }, { status: 400 });
     }
 
-    const audioBuffer = await veniceTTS(text, voice || 'af_nicole');
+    const audioBuffer = await veniceTTS(text, voice || 'ara');
 
     return new NextResponse(audioBuffer, {
       headers: {
