@@ -117,7 +117,7 @@ export async function veniceTTS(text: string, voice: string = 'af_nicole'): Prom
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'tts-kokoro',
+      model: 'tts-xai-v1',
       input: text,
       voice: voice,
       response_format: 'mp3',

@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Mic, MicOff, Send, BarChart3, ArrowLeft,
   Volume2, VolumeX, BookOpen,
-  X, AlertCircle, Brain, ChevronRight, ChevronDown,
+  X, AlertCircle, ChevronDown, Trash2, Pencil,
   Calendar, Feather, MapPin, Heart, Hand, Lightbulb, Footprints
 } from 'lucide-react';
 
@@ -30,10 +30,18 @@ interface ThoughtRecord {
   summary?: string;
 }
 
-type View = 'chat' | 'dashboard';
+type View = 'start' | 'chat' | 'dashboard';
+
+const PILLARS = [
+  { key: 'situation' as const, label: 'Situation', icon: MapPin, desc: 'What happened?' },
+  { key: 'emotions' as const, label: 'Emotions', icon: Heart, desc: 'What did you feel?' },
+  { key: 'physicalSensations' as const, label: 'Physical', icon: Hand, desc: 'Body sensations?' },
+  { key: 'thoughts' as const, label: 'Thoughts', icon: Lightbulb, desc: 'What were you thinking?' },
+  { key: 'behaviors' as const, label: 'Behaviors', icon: Footprints, desc: 'What did you do?' },
+];
 
 export default function MindShiftApp() {
-  const [view, setView] = useState<View>('chat');
+  const [view, setView] = useState<View>('start');
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -43,27 +51,35 @@ export default function MindShiftApp() {
   const [error, setError] = useState<string | null>(null);
   const [micSupported, setMicSupported] = useState(false);
   const [expandedRecord, setExpandedRecord] = useState<string | null>(null);
+  const [editingRecord, setEditingRecord] = useState<string | null>(null);
+  const [editData, setEditData] = useState<Record<string, string>>({});
+  const [capturedPillars, setCapturedPillars] = useState<Record<string, string>>({});
+  const [recordingDuration, setRecordingDuration] = useState(0);
+
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [recordingDuration, setRecordingDuration] = useState(0);
 
   useEffect(() => { setMicSupported(!!(navigator.mediaDevices?.getUserMedia)); }, []);
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isLoading]);
 
+  // Parse [FIELD: pillar|summary] markers from messages
   useEffect(() => {
-    if (messages.length === 0) {
-      setMessages([{
-        id: 'welcome',
-        role: 'assistant',
-        content: "Hey. I'm here to listen.\n\nTell me what's been weighing on you — or just tap the mic and say it out loud. I'll walk you through it, one step at a time.",
-        timestamp: new Date(),
-      }]);
+    const allText = messages.map(m => m.content).join('\n');
+    const fieldRegex = /\[FIELD:\s*(situation|emotions|physical|thoughts|behaviors)\s*\|\s*([^\]]+)\]/gi;
+    const newCaptured: Record<string, string> = {};
+    let match;
+    while ((match = fieldRegex.exec(allText)) !== null) {
+      const pillar = match[1].toLowerCase() === 'physical' ? 'physicalSensations' : match[1].toLowerCase();
+      newCaptured[pillar] = match[2].trim();
     }
-  }, []);
+    if (Object.keys(newCaptured).length > 0) {
+      setCapturedPillars(prev => ({ ...prev, ...newCaptured }));
+    }
+  }, [messages]);
 
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || isLoading) return;
@@ -118,23 +134,87 @@ export default function MindShiftApp() {
     try {
       const res = await fetch('/api/records', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: messages.map(m => ({ role: m.role, content: m.content })) }) });
       const data = await res.json();
-      if (data.record) { setRecords(prev => [data.record, ...prev]); setMessages(prev => [...prev, { id: `s-${Date.now()}`, role: 'system', content: '✦ Saved to your journal.', timestamp: new Date() }]); }
+      if (data.record) {
+        setRecords(prev => [data.record, ...prev]);
+        setMessages(prev => [...prev, { id: `s-${Date.now()}`, role: 'system', content: '✦ Saved to your journal.', timestamp: new Date() }]);
+      }
     } catch { setError('Failed to save.'); }
   }, [messages]);
 
-  useEffect(() => { if (view === 'dashboard') { fetch('/api/records').then(r => r.json()).then(d => setRecords(d.records || [])).catch(() => {}); } }, [view]);
+  const deleteRecord = useCallback(async (id: string) => {
+    try {
+      await fetch(`/api/records?id=${id}`, { method: 'DELETE' });
+      setRecords(prev => prev.filter(r => r.id !== id));
+      setExpandedRecord(null);
+    } catch { setError('Failed to delete.'); }
+  }, []);
 
-  const messageCount = messages.filter(m => m.role === 'user').length;
-  const showSave = messageCount >= 3;
+  const updateRecord = useCallback(async (id: string, data: Record<string, string>) => {
+    try {
+      const res = await fetch('/api/records', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, ...data }) });
+      const updated = await res.json();
+      if (updated.record) {
+        setRecords(prev => prev.map(r => r.id === id ? { ...r, ...updated.record } : r));
+        setEditingRecord(null);
+      }
+    } catch { setError('Failed to update.'); }
+  }, []);
+
+  useEffect(() => {
+    if (view === 'dashboard') { fetch('/api/records').then(r => r.json()).then(d => setRecords(d.records || [])).catch(() => {}); }
+  }, [view]);
+
+  const filledPillars = PILLARS.filter(p => capturedPillars[p.key]).length;
+
+  // ──── START SCREEN ────
+  if (view === 'start') {
+    return (
+      <div className="min-h-screen bg-cream flex flex-col items-center justify-center px-6">
+        <div className="max-w-sm w-full text-center">
+          <div className="w-16 h-16 rounded-2xl bg-bark flex items-center justify-center mx-auto mb-6">
+            <Feather size={28} className="text-cream" />
+          </div>
+          <h1 className="font-display text-3xl text-bark mb-2">MindShift</h1>
+          <p className="text-warm text-sm mb-10 leading-relaxed">Talk through what's on your mind. I'll guide you through 5 pillars of a thought record, one question at a time.</p>
+
+          {/* 5 pillars preview */}
+          <div className="flex justify-center gap-2.5 mb-10">
+            {PILLARS.map(p => {
+              const IconComp = p.icon;
+              return (
+                <div key={p.key} className="flex flex-col items-center gap-1.5" title={p.desc}>
+                  <div className="w-10 h-10 rounded-xl bg-sand/60 flex items-center justify-center">
+                    <IconComp size={18} className="text-warm" />
+                  </div>
+                  <span className="text-[10px] text-warm/60">{p.label}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          <button onClick={() => { setView('chat'); if (messages.length === 0) { setMessages([{ id: 'welcome', role: 'assistant', content: "Hey. I'm here to listen.\n\nTell me what's been weighing on you — or just tap the mic and say it out loud. I'll walk you through it, one step at a time. What's going on?", timestamp: new Date() }]); } }}
+            className="w-full py-4 rounded-xl bg-bark text-cream font-medium text-base hover:bg-bark/85 active:scale-[0.98] transition-all">
+            Start Your Session
+          </button>
+
+          <button onClick={() => setView('dashboard')} className="mt-4 text-sm text-warm/50 hover:text-warm/80 transition-colors flex items-center gap-1.5 justify-center">
+            <BarChart3 size={14} /> View Journal
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // ──── CHAT VIEW ────
   if (view === 'chat') {
     return (
       <div className="min-h-screen bg-cream flex flex-col">
-        {/* Header — minimal, warm */}
         <header className="sticky top-0 z-50 bg-cream/90 backdrop-blur-sm border-b border-sand/60">
-          <div className="max-w-2xl mx-auto px-5 py-3 flex items-center justify-between">
+          <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
+              <button onClick={() => setView('start')} className="p-1.5 rounded-lg hover:bg-sand/40 text-warm hover:text-bark transition-colors">
+                <ArrowLeft size={16} />
+              </button>
               <div className="w-7 h-7 rounded-lg bg-bark flex items-center justify-center">
                 <Feather size={14} className="text-cream" />
               </div>
@@ -149,9 +229,26 @@ export default function MindShiftApp() {
               </button>
             </div>
           </div>
+          {/* Pillar progress bar */}
+          {filledPillars > 0 && (
+            <div className="max-w-2xl mx-auto px-4 pb-2">
+              <div className="flex items-center gap-1.5">
+                {PILLARS.map(p => {
+                  const filled = !!capturedPillars[p.key];
+                  const IconComp = p.icon;
+                  return (
+                    <div key={p.key} className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition-all ${filled ? 'bg-sage/10 text-sage' : 'bg-sand/40 text-warm/40'}`} title={`${p.label}: ${filled ? capturedPillars[p.key]?.slice(0, 40) + '...' : 'Not yet'}`}>
+                      <IconComp size={11} />
+                      <span className="hidden sm:inline">{p.label}</span>
+                      {filled && <span className="text-sage">✓</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </header>
 
-        {/* Error */}
         <AnimatePresence>
           {error && (
             <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
@@ -161,7 +258,6 @@ export default function MindShiftApp() {
           )}
         </AnimatePresence>
 
-        {/* Messages */}
         <div className="flex-1 overflow-y-auto px-4 py-6">
           <div className="max-w-2xl mx-auto space-y-5">
             {messages.map((msg) => (
@@ -173,7 +269,7 @@ export default function MindShiftApp() {
                   <div className="max-w-[80%]">
                     <div className="text-[11px] text-warm/60 mb-1 ml-0.5">MindShift</div>
                     <div className="bg-white border border-sand/60 rounded-2xl rounded-tl-sm px-4 py-3">
-                      <div className="whitespace-pre-wrap text-sm leading-relaxed text-bark/85">{msg.content}</div>
+                      <div className="whitespace-pre-wrap text-sm leading-relaxed text-bark/85">{msg.content.replace(/\[FIELD:[^\]]+\]/gi, '')}</div>
                     </div>
                     <div className="text-[10px] text-warm/30 mt-1 ml-0.5">{msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                   </div>
@@ -201,42 +297,30 @@ export default function MindShiftApp() {
           </div>
         </div>
 
-        {/* Save */}
-        {showSave && !isLoading && (
+        {filledPillars >= 3 && !isLoading && (
           <div className="px-4 pb-2 max-w-2xl mx-auto w-full">
             <button onClick={saveRecord} className="w-full py-3 rounded-xl bg-sage text-cream font-medium text-sm hover:bg-sage/90 transition-colors flex items-center justify-center gap-2">
-              <BookOpen size={15} /> Save to Journal
+              <BookOpen size={15} /> Save to Journal ({filledPillars}/5 pillars)
             </button>
           </div>
         )}
 
-        {/* Input — voice prominent */}
         <div className="border-t border-sand/60 bg-cream px-4 py-4">
           <div className="max-w-2xl mx-auto flex flex-col items-center gap-3">
             {micSupported && (
-              <button
-                onClick={isRecording ? stopRecording : startRecording}
-                disabled={isLoading}
-                className={`relative w-14 h-14 rounded-full transition-all duration-200 flex items-center justify-center shrink-0 ${
-                  isRecording ? 'bg-terracotta text-cream' : 'bg-bark text-cream hover:bg-bark/85 active:scale-95'
-                } disabled:opacity-30`}
-              >
+              <button onClick={isRecording ? stopRecording : startRecording} disabled={isLoading}
+                className={`relative w-14 h-14 rounded-full transition-all duration-200 flex items-center justify-center shrink-0 ${isRecording ? 'bg-terracotta text-cream' : 'bg-bark text-cream hover:bg-bark/85 active:scale-95'} disabled:opacity-30`}>
                 {isRecording ? <MicOff size={22} /> : <Mic size={22} />}
                 {isRecording && <span className="absolute -top-1 -right-1 text-[10px] font-semibold bg-terracotta text-cream px-1.5 py-0.5 rounded-full">{recordingDuration}s</span>}
                 {isRecording && <div className="absolute inset-0 rounded-full border-2 border-terracotta/40" style={{ animation: 'pulse-ring 1.5s ease-out infinite' }} />}
               </button>
             )}
             <div className="w-full flex items-center gap-2">
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
+              <textarea ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); }}}
                 placeholder={isRecording ? 'Listening...' : 'What\'s on your mind?'}
-                disabled={isLoading || isRecording}
-                rows={1}
-                className="flex-1 bg-white border border-sand rounded-xl px-4 py-3 text-sm text-bark placeholder:text-warm/40 focus:outline-none focus:border-sage focus:ring-2 focus:ring-sage/20 resize-none disabled:opacity-30 transition-all"
-              />
+                disabled={isLoading || isRecording} rows={1}
+                className="flex-1 bg-white border border-sand rounded-xl px-4 py-3 text-sm text-bark placeholder:text-warm/40 focus:outline-none focus:border-sage focus:ring-2 focus:ring-sage/20 resize-none disabled:opacity-30 transition-all" />
               <button onClick={() => sendMessage(input)} disabled={!input.trim() || isLoading}
                 className="p-3 rounded-xl bg-bark text-cream disabled:opacity-15 hover:bg-bark/85 active:scale-95 transition-all shrink-0">
                 <Send size={16} />
@@ -254,20 +338,12 @@ export default function MindShiftApp() {
     acc[date] = acc[date] || []; acc[date].push(r); return acc;
   }, {});
 
-  const pillars = [
-    { key: 'situation', label: 'Situation', icon: MapPin, color: 'bg-bark/5 text-bark' },
-    { key: 'emotions', label: 'Emotions', icon: Heart, color: 'bg-terracotta/8 text-terracotta' },
-    { key: 'physicalSensations', label: 'Physical', icon: Hand, color: 'bg-sage/8 text-sage' },
-    { key: 'thoughts', label: 'Thoughts', icon: Lightbulb, color: 'bg-bark/8 text-warm' },
-    { key: 'behaviors', label: 'Behaviors', icon: Footprints, color: 'bg-sage/5 text-sage' },
-  ] as const;
-
   return (
     <div className="min-h-screen bg-cream flex flex-col">
       <header className="sticky top-0 z-50 bg-cream/90 backdrop-blur-sm border-b border-sand/60">
-        <div className="max-w-2xl mx-auto px-5 py-3 flex items-center justify-between">
+        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <button onClick={() => setView('chat')} className="p-2 rounded-lg hover:bg-sand/40 text-warm hover:text-bark transition-colors">
+            <button onClick={() => setView('start')} className="p-2 rounded-lg hover:bg-sand/40 text-warm hover:text-bark transition-colors">
               <ArrowLeft size={16} />
             </button>
             <div className="w-7 h-7 rounded-lg bg-bark flex items-center justify-center">
@@ -275,12 +351,15 @@ export default function MindShiftApp() {
             </div>
             <span className="font-display text-lg text-bark">Journal</span>
           </div>
+          <button onClick={() => { setMessages([]); setCapturedPillars({}); setView('chat'); }}
+            className="px-4 py-1.5 rounded-lg bg-bark text-cream text-sm font-medium hover:bg-bark/85 transition-colors">
+            New Session
+          </button>
         </div>
       </header>
 
       <div className="flex-1 overflow-y-auto px-4 py-6">
         <div className="max-w-2xl mx-auto">
-          {/* Stats */}
           <div className="grid grid-cols-3 gap-4 mb-10">
             <div className="bg-white border border-sand rounded-xl p-5">
               <div className="text-3xl font-display text-bark">{records.length}</div>
@@ -298,12 +377,12 @@ export default function MindShiftApp() {
             </div>
           </div>
 
-          {/* Records by date */}
           {Object.keys(grouped).length === 0 ? (
             <div className="text-center py-16">
               <div className="text-4xl mb-3">📝</div>
-              <p className="text-warm text-sm">No records yet. Start a conversation.</p>
-              <button onClick={() => setView('chat')} className="mt-4 px-5 py-2 rounded-xl bg-bark text-cream text-sm font-medium hover:bg-bark/85 transition-colors">
+              <p className="text-warm text-sm mb-6">No records yet. Start a conversation to capture your first thought record.</p>
+              <button onClick={() => { setView('chat'); if (messages.length === 0) setMessages([{ id: 'welcome', role: 'assistant', content: "Hey. I'm here to listen.\n\nTell me what's been weighing on you — or just tap the mic and say it out loud. I'll walk you through it, one step at a time. What's going on?", timestamp: new Date() }]); }}
+                className="px-6 py-3 rounded-xl bg-bark text-cream font-medium hover:bg-bark/85 transition-colors">
                 Start Talking
               </button>
             </div>
@@ -318,21 +397,19 @@ export default function MindShiftApp() {
                   <div className="space-y-3">
                     {recs.map(record => {
                       const isExpanded = expandedRecord === record.id;
-                      const filledCount = pillars.filter(p => (record as any)[p.key]).length;
+                      const isEditing = editingRecord === record.id;
+                      const filledCount = PILLARS.filter(p => (record as any)[p.key]).length;
                       return (
-                        <div key={record.id}
-                          className="bg-white border border-sand rounded-xl overflow-hidden">
-                          {/* Card header */}
-                          <button
-                            onClick={() => setExpandedRecord(isExpanded ? null : record.id)}
+                        <div key={record.id} className="bg-white border border-sand rounded-xl overflow-hidden">
+                          <button onClick={() => { setExpandedRecord(isExpanded ? null : record.id); setEditingRecord(null); }}
                             className="w-full p-4 text-left hover:bg-sand/20 transition-colors">
                             <div className="flex items-center justify-between gap-3">
                               <div className="flex-1 min-w-0">
                                 <p className="text-sm text-bark line-clamp-2">{record.summary || record.situation || 'Thought Record'}</p>
-                                <div className="flex items-center gap-2 mt-1.5">
+                                <div className="flex items-center gap-2 mt-1">
                                   <span className="text-[11px] text-warm/50">{new Date(record.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                   <span className="text-[11px] text-warm/30">·</span>
-                                  <span className="text-[11px] text-sage">{filledCount}/5 pillars</span>
+                                  <span className={`text-[11px] ${filledCount >= 4 ? 'text-sage' : 'text-warm/40'}`}>{filledCount}/5 pillars</span>
                                 </div>
                               </div>
                               <div className="flex items-center gap-2 shrink-0">
@@ -346,28 +423,35 @@ export default function MindShiftApp() {
                             </div>
                           </button>
 
-                          {/* Expanded 5-pillar detail */}
                           {isExpanded && (
                             <div className="border-t border-sand/40">
-                              {pillars.map(pillar => {
-                                const value = (record as any)[pillar.key] as string | undefined;
+                              {/* 5-pillar detail */}
+                              {PILLARS.map(pillar => {
+                                const value = isEditing ? (editData[pillar.key] ?? (record as any)[pillar.key] ?? '') : ((record as any)[pillar.key] as string | undefined);
                                 const IconComp = pillar.icon;
                                 return (
                                   <div key={pillar.key} className="flex gap-3 px-4 py-3 border-b border-sand/20 last:border-b-0">
-                                    <div className={`shrink-0 w-7 h-7 rounded-lg ${pillar.color} flex items-center justify-center`}>
+                                    <div className={`shrink-0 w-7 h-7 rounded-lg ${value ? 'bg-sage/10 text-sage' : 'bg-sand/50 text-warm/30'} flex items-center justify-center`}>
                                       <IconComp size={14} />
                                     </div>
                                     <div className="flex-1 min-w-0">
                                       <div className="text-[11px] font-medium text-warm/60 uppercase tracking-wider">{pillar.label}</div>
-                                      <div className="text-sm text-bark mt-0.5">
-                                        {value || <span className="text-warm/30 italic">Not captured</span>}
-                                      </div>
+                                      {isEditing ? (
+                                        <textarea value={editData[pillar.key] ?? (record as any)[pillar.key] ?? ''}
+                                          onChange={(e) => setEditData(prev => ({ ...prev, [pillar.key]: e.target.value }))}
+                                          className="w-full mt-1 text-sm text-bark bg-sand/20 rounded-lg px-2 py-1.5 border border-sand/40 focus:border-sage focus:outline-none resize-none"
+                                          rows={2} />
+                                      ) : (
+                                        <div className="text-sm text-bark mt-0.5">
+                                          {value || <span className="text-warm/30 italic">Not captured</span>}
+                                        </div>
+                                      )}
                                     </div>
                                   </div>
                                 );
                               })}
 
-                              {/* Distortions & Reframes */}
+                              {/* Distortions */}
                               {record.cognitiveDistortions && record.cognitiveDistortions.length > 0 && (
                                 <div className="px-4 py-3 border-t border-sand/20">
                                   <div className="text-[11px] font-medium text-warm/60 uppercase tracking-wider mb-2">Distortions Detected</div>
@@ -378,19 +462,22 @@ export default function MindShiftApp() {
                                   </div>
                                 </div>
                               )}
+
+                              {/* Reframes */}
                               {record.reframedThoughts && record.reframedThoughts.length > 0 && (
                                 <div className="px-4 py-3 border-t border-sand/20">
                                   <div className="text-[11px] font-medium text-warm/60 uppercase tracking-wider mb-2">Reframes</div>
                                   <ul className="space-y-1">
                                     {record.reframedThoughts.map((r, i) => (
                                       <li key={i} className="text-sm text-sage flex items-start gap-2">
-                                        <span className="text-sage/50 mt-1 shrink-0">✦</span>
-                                        <span>{r}</span>
+                                        <span className="text-sage/50 mt-1 shrink-0">✦</span><span>{r}</span>
                                       </li>
                                     ))}
                                   </ul>
                                 </div>
                               )}
+
+                              {/* Intensity bar */}
                               {record.emotionIntensity != null && (
                                 <div className="px-4 py-3 border-t border-sand/20">
                                   <div className="text-[11px] font-medium text-warm/60 uppercase tracking-wider mb-1.5">Emotion Intensity</div>
@@ -402,6 +489,33 @@ export default function MindShiftApp() {
                                   </div>
                                 </div>
                               )}
+
+                              {/* Action buttons */}
+                              <div className="px-4 py-3 flex items-center gap-2 border-t border-sand/20">
+                                {isEditing ? (
+                                  <>
+                                    <button onClick={() => updateRecord(record.id, editData)}
+                                      className="px-4 py-1.5 rounded-lg bg-sage text-cream text-sm font-medium hover:bg-sage/90 transition-colors">
+                                      Save Changes
+                                    </button>
+                                    <button onClick={() => setEditingRecord(null)}
+                                      className="px-4 py-1.5 rounded-lg bg-sand/40 text-warm text-sm hover:bg-sand/60 transition-colors">
+                                      Cancel
+                                    </button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button onClick={(e) => { e.stopPropagation(); setEditingRecord(record.id); setEditData({ situation: record.situation || '', emotions: record.emotions || '', physicalSensations: record.physicalSensations || '', thoughts: record.thoughts || '', behaviors: record.behaviors || '' }); }}
+                                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-warm hover:text-bark hover:bg-sand/40 transition-colors text-sm">
+                                      <Pencil size={13} /> Edit
+                                    </button>
+                                    <button onClick={(e) => { e.stopPropagation(); if (confirm('Delete this record? This cannot be undone.')) deleteRecord(record.id); }}
+                                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-terracotta/70 hover:text-terracotta hover:bg-terracotta/5 transition-colors text-sm">
+                                      <Trash2 size={13} /> Delete
+                                    </button>
+                                  </>
+                                )}
+                              </div>
                             </div>
                           )}
                         </div>
