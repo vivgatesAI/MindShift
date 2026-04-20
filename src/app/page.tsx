@@ -32,7 +32,7 @@ interface ThoughtRecord {
   summary?: string;
 }
 
-type View = 'landing' | 'chat' | 'dashboard';
+type View = 'chat' | 'dashboard';
 
 // ─────────────── ANIMATED ORB BACKGROUND ───────────────
 function OrbBackground() {
@@ -82,7 +82,7 @@ function Particles() {
 
 // ─────────────── MAIN APP ───────────────
 export default function MindShiftApp() {
-  const [view, setView] = useState<View>('landing');
+  const [view, setView] = useState<View>('chat');
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -245,87 +245,7 @@ export default function MindShiftApp() {
     }
   }, [view]);
 
-  // ─────────────── LANDING PAGE ───────────────
-  if (view === 'landing') {
-    return (
-      <div className="min-h-screen bg-[#030014] flex flex-col items-center justify-center relative overflow-hidden">
-        <OrbBackground />
-        <Particles />
-        <div className="relative z-10 text-center px-6 max-w-lg">
-          <motion.div
-            initial={{ scale: 0.5, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ duration: 0.8, type: 'spring' }}
-            className="w-24 h-24 mx-auto mb-8 rounded-3xl bg-gradient-to-br from-indigo-500 via-purple-500 to-cyan-400 flex items-center justify-center shadow-2xl shadow-indigo-500/30"
-          >
-            <Brain size={44} className="text-white" />
-          </motion.div>
-
-          <motion.h1
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.2 }}
-            className="text-4xl font-display font-bold tracking-tight mb-3"
-          >
-            <span className="bg-gradient-to-r from-indigo-300 via-purple-300 to-cyan-300 bg-clip-text text-transparent">MindShift</span>
-          </motion.h1>
-
-          <motion.p
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.3 }}
-            className="text-white/40 text-lg mb-2"
-          >
-            AI-Powered CBT Thought Records
-          </motion.p>
-
-          <motion.p
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.4 }}
-            className="text-white/25 text-sm mb-10 max-w-sm mx-auto"
-          >
-            Talk through your thoughts. I'll guide you through identifying patterns, distortions, and reframes.
-          </motion.p>
-
-          <motion.button
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.5 }}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => {
-              setView('chat');
-              if (messages.length === 0) {
-                setMessages([{
-                  id: 'welcome',
-                  role: 'assistant',
-                  content: "Welcome. ✨\n\nI'm here to help you explore your thoughts. Just tell me what's been on your mind — or tap the mic and speak freely. I'll guide you through it.",
-                  timestamp: new Date(),
-                }]);
-              }
-            }}
-            className="px-10 py-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-cyan-500 text-white font-semibold text-lg shadow-xl shadow-indigo-500/25 hover:shadow-indigo-500/40 transition-all"
-          >
-            Start Your Session
-          </motion.button>
-
-          <motion.button
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.7 }}
-            onClick={() => setView('dashboard')}
-            className="mt-6 block mx-auto text-white/30 hover:text-white/60 transition-colors text-sm flex items-center gap-1.5 justify-center"
-          >
-            <BarChart3 size={14} />
-            View Journal
-          </motion.button>
-        </div>
-      </div>
-    );
-  }
-
-  // ─────────────── CHAT VIEW ───────────────
+  // ─────────────── MAIN RENDER ───────────────
   const messageCount = messages.filter(m => m.role === 'user').length;
   const showSave = messageCount >= 3;
 
