@@ -36,8 +36,14 @@ export async function POST(req: NextRequest) {
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('Chat API error:', message);
+    
+    // Return user-friendly error message
+    const userMessage = message.includes('wait') || message.includes('unavailable') 
+      ? message 
+      : 'Unable to process your message right now. Please try again.';
+    
     return NextResponse.json(
-      { error: 'Failed to get response', details: message },
+      { error: userMessage },
       { status: 500 }
     );
   }

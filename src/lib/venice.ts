@@ -1,6 +1,12 @@
 const VENICE_API_KEY = process.env.VENICE_API_KEY;
 const VENICE_BASE = 'https://api.venice.ai/api/v1';
 
+// Circuit breaker to prevent API hammering
+let consecutiveErrors = 0;
+let lastErrorTime = 0;
+const ERROR_COOLDOWN_MS = 30000; // 30 seconds
+const MAX_CONSECUTIVE_ERRORS = 10; // Allow up to 10 messages before cooldown
+
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -53,37 +59,76 @@ These markers let us save structured data. ALWAYS include a brief summary after 
 DO NOT include these markers if the user hasn't provided a real answer for that pillar yet.`;
 
 export async function veniceChat(messages: ChatMessage[]): Promise<string> {
+  // Check circuit breaker
+  const now = Date.now();
+  if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+    if (now - lastErrorTime < ERROR_COOLDOWN_MS) {
+      const waitSeconds = Math.ceil((ERROR_COOLDOWN_MS - (now - lastErrorTime)) / 1000);
+      throw new Error(`Please wait ${waitSeconds} seconds before sending another message. The service needs a brief pause.`);
+    }
+    // Reset after cooldown
+    consecutiveErrors = 0;
+  }
+
+  // Check if API key is configured
+  if (!VENICE_API_KEY) {
+    throw new Error('Service temporarily unavailable. Please try again in a moment.');
+  }
+
   const allMessages: ChatMessage[] = [
     { role: 'system', content: SYSTEM_PROMPT },
     ...messages,
   ];
 
-  const response = await fetch(`${VENICE_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${VENICE_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'google-gemma-4-31b-it',
-      messages: allMessages,
-      temperature: 0.7,
-      max_tokens: 500,
-      venice_parameters: {
-        include_venice_system_prompt: false,
-        strip_thinking_response: true,
+  try {
+    const response = await fetch(`${VENICE_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${VENICE_API_KEY}`,
+        'Content-Type': 'application/json',
       },
-    }),
-  });
+      body: JSON.stringify({
+        model: 'google-gemma-4-31b-it',
+        messages: allMessages,
+        temperature: 0.7,
+        max_tokens: 500,
+        venice_parameters: {
+          include_venice_system_prompt: false,
+          strip_thinking_response: true,
+        },
+      }),
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error('Venice chat error:', response.status, errorText);
-    throw new Error(`Venice API error: ${response.status}`);
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Venice chat error:', response.status, errorText);
+      
+      // Track consecutive errors
+      consecutiveErrors++;
+      lastErrorTime = Date.now();
+      
+      if (response.status === 429) {
+        throw new Error('Too many messages. Please wait a moment before continuing.');
+      } else if (response.status >= 500) {
+        throw new Error('The service is temporarily unavailable. Please try again shortly.');
+      } else {
+        throw new Error('Something went wrong. Please try again.');
+      }
+    }
+
+    // Reset error counter on success
+    consecutiveErrors = 0;
+
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content || "I'm having trouble responding right now. Could you try again?";
+  } catch (error) {
+    // Track network/fetch errors too
+    if (error instanceof Error && !error.message.includes('wait')) {
+      consecutiveErrors++;
+      lastErrorTime = Date.now();
+    }
+    throw error;
   }
-
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content || "I'm having trouble responding right now. Could you try again?";
 }
 
 export async function veniceTranscribe(audioBuffer: Buffer, filename: string = 'recording.webm'): Promise<string> {

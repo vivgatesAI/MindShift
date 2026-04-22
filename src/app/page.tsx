@@ -71,9 +71,18 @@ export default function MindShiftApp() {
   const [editData, setEditData] = useState<Record<string, string>>({});
   const [capturedPillars, setCapturedPillars] = useState<Record<string, string>>({});
   const [recordingDuration, setRecordingDuration] = useState(0);
+  const [inputHeight, setInputHeight] = useState('auto');
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  
+  // Auto-resize textarea
+  const autoResizeTextarea = useCallback(() => {
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+      inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 150) + 'px';
+    }
+  }, []);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -334,11 +343,19 @@ export default function MindShiftApp() {
           </div>
         </div>
 
-        {filledPillars >= 3 && !isLoading && (
-          <div className="px-4 pb-2 max-w-2xl mx-auto w-full">
-            <button onClick={saveRecord} className="w-full py-3 rounded-xl bg-sage text-cream font-medium text-sm hover:bg-sage/90 transition-colors flex items-center justify-center gap-2">
-              <BookOpen size={15} /> Save to Journal ({filledPillars}/5 pillars)
+        {/* Save buttons - one for quick save, one for full record */}
+        {messages.length > 1 && !isLoading && (
+          <div className="px-4 pb-2 max-w-2xl mx-auto w-full space-y-2">
+            {/* Always show quick save after first exchange */}
+            <button onClick={saveRecord} className="w-full py-3 rounded-xl bg-sand text-bark font-medium text-sm hover:bg-sand/80 transition-colors flex items-center justify-center gap-2">
+              <BookOpen size={15} /> Quick Save
             </button>
+            {/* Full save button when enough pillars captured */}
+            {filledPillars >= 3 && (
+              <button onClick={saveRecord} className="w-full py-3 rounded-xl bg-sage text-cream font-medium text-sm hover:bg-sage/90 transition-colors flex items-center justify-center gap-2">
+                <BookOpen size={15} /> Save Complete Record ({filledPillars}/5 pillars)
+              </button>
+            )}
           </div>
         )}
 
@@ -346,21 +363,22 @@ export default function MindShiftApp() {
           <div className="max-w-2xl mx-auto flex flex-col items-center gap-3">
             {micSupported && (
               <button onClick={isRecording ? stopRecording : startRecording} disabled={isLoading}
-                className={`relative w-14 h-14 rounded-full transition-all duration-200 flex items-center justify-center shrink-0 ${isRecording ? 'bg-terracotta text-cream' : 'bg-bark text-cream hover:bg-bark/85 active:scale-95'} disabled:opacity-30`}>
-                {isRecording ? <MicOff size={22} /> : <Mic size={22} />}
+                className={`relative w-16 h-16 rounded-full transition-all duration-200 flex items-center justify-center shrink-0 touch-manipulation ${isRecording ? 'bg-terracotta text-cream' : 'bg-bark text-cream hover:bg-bark/85 active:scale-95'} disabled:opacity-30`}>
+                {isRecording ? <MicOff size={24} /> : <Mic size={24} />}
                 {isRecording && <span className="absolute -top-1 -right-1 text-[10px] font-semibold bg-terracotta text-cream px-1.5 py-0.5 rounded-full">{recordingDuration}s</span>}
                 {isRecording && <div className="absolute inset-0 rounded-full border-2 border-terracotta/40" style={{ animation: 'pulse-ring 1.5s ease-out infinite' }} />}
               </button>
             )}
             <div className="w-full flex items-center gap-2">
-              <textarea ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)}
+              <textarea ref={inputRef} value={input} onChange={(e) => { setInput(e.target.value); autoResizeTextarea(); }}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); }}}
+                style={{ minHeight: '44px', touchAction: 'manipulation' }}
                 placeholder={isRecording ? 'Listening...' : 'What\'s on your mind?'}
                 disabled={isLoading || isRecording} rows={1}
                 className="flex-1 bg-white border border-sand rounded-xl px-4 py-3 text-sm text-bark placeholder:text-warm/40 focus:outline-none focus:border-sage focus:ring-2 focus:ring-sage/20 resize-none disabled:opacity-30 transition-all" />
               <button onClick={() => sendMessage(input)} disabled={!input.trim() || isLoading}
-                className="p-3 rounded-xl bg-bark text-cream disabled:opacity-15 hover:bg-bark/85 active:scale-95 transition-all shrink-0">
-                <Send size={16} />
+                className="p-4 min-h-[52px] min-w-[52px] rounded-xl bg-bark text-cream disabled:opacity-15 hover:bg-bark/85 active:scale-95 transition-all shrink-0 flex items-center justify-center">
+                <Send size={18} />
               </button>
             </div>
           </div>
