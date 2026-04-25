@@ -1,11 +1,18 @@
 const VENICE_API_KEY = process.env.VENICE_API_KEY;
 const VENICE_BASE = 'https://api.venice.ai/api/v1';
 
-// Circuit breaker to prevent API hammering
-let consecutiveErrors = 0;
-let lastErrorTime = 0;
-const ERROR_COOLDOWN_MS = 30000; // 30 seconds
-const MAX_CONSECUTIVE_ERRORS = 10; // Allow up to 10 messages before cooldown
+// Model and generation config
+const CHAT_MODEL = process.env.VENICE_CHAT_MODEL || 'google-gemma-4-31b-it';
+const MAX_TOKENS = parseInt(process.env.VENICE_MAX_TOKENS || '1500', 10);
+const TEMPERATURE = parseFloat(process.env.VENICE_TEMPERATURE || '0.7');
+
+// Retry config for rate limits
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 2000; // 2s base, exponential backoff
+
+// Conversation summarization config
+const MAX_CONTEXT_MESSAGES = 20; // Keep last N messages before summarizing
+const SUMMARIZATION_TRIGGER = 24; // Start summarizing when conversation exceeds this
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -58,40 +65,81 @@ These markers let us save structured data. ALWAYS include a brief summary after 
 
 DO NOT include these markers if the user hasn't provided a real answer for that pillar yet.`;
 
-export async function veniceChat(messages: ChatMessage[]): Promise<string> {
-  // Check circuit breaker
-  const now = Date.now();
-  if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-    if (now - lastErrorTime < ERROR_COOLDOWN_MS) {
-      const waitSeconds = Math.ceil((ERROR_COOLDOWN_MS - (now - lastErrorTime)) / 1000);
-      throw new Error(`Please wait ${waitSeconds} seconds before sending another message. The service needs a brief pause.`);
-    }
-    // Reset after cooldown
-    consecutiveErrors = 0;
+/**
+ * Summarize older messages into a compact context block.
+ * Keeps the most recent messages intact and compresses older ones.
+ */
+function compressConversation(messages: ChatMessage[]): ChatMessage[] {
+  if (messages.length <= MAX_CONTEXT_MESSAGES) return messages;
+
+  // Split: older messages to summarize + recent messages to keep
+  const recentMessages = messages.slice(-MAX_CONTEXT_MESSAGES);
+  const olderMessages = messages.slice(0, -MAX_CONTEXT_MESSAGES);
+
+  // Build a summary of the older conversation
+  const summaryParts: string[] = [];
+  for (const msg of olderMessages) {
+    if (msg.role === 'system') continue; // skip system messages in summary
+    const prefix = msg.role === 'user' ? 'User' : 'MindShift';
+    // Truncate individual messages to keep summary compact
+    const content = msg.content.length > 200 ? msg.content.slice(0, 200) + '...' : msg.content;
+    summaryParts.push(`${prefix}: ${content}`);
   }
 
+  const summaryText = summaryParts.join('\n');
+  const summaryMessage: ChatMessage = {
+    role: 'system',
+    content: `[Previous conversation summary]\n${summaryText}\n[End of summary. Continue naturally from here.]`,
+  };
+
+  return [summaryMessage, ...recentMessages];
+}
+
+async function fetchWithRetry(url: string, options: RequestInit, retries: number = MAX_RETRIES): Promise<Response> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const response = await fetch(url, options);
+
+    if (response.status === 429 && attempt < retries) {
+      // Exponential backoff: 2s, 4s, 8s
+      const delay = BASE_DELAY_MS * Math.pow(2, attempt);
+      console.log(`Rate limited (429). Retrying in ${delay}ms (attempt ${attempt + 1}/${retries})`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      continue;
+    }
+
+    return response;
+  }
+
+  // Should not reach here, but TS needs it
+  throw new Error('Max retries exceeded');
+}
+
+export async function veniceChat(messages: ChatMessage[]): Promise<string> {
   // Check if API key is configured
   if (!VENICE_API_KEY) {
     throw new Error('Service temporarily unavailable. Please try again in a moment.');
   }
 
+  // Compress conversation if it's getting too long
+  const compressedMessages = compressConversation(messages);
+
   const allMessages: ChatMessage[] = [
     { role: 'system', content: SYSTEM_PROMPT },
-    ...messages,
+    ...compressedMessages,
   ];
 
   try {
-    const response = await fetch(`${VENICE_BASE}/chat/completions`, {
+    const response = await fetchWithRetry(`${VENICE_BASE}/chat/completions`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${VENICE_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google-gemma-4-31b-it',
+        model: CHAT_MODEL,
         messages: allMessages,
-        temperature: 0.7,
-        max_tokens: 500,
+        temperature: TEMPERATURE,
+        max_tokens: MAX_TOKENS,
         venice_parameters: {
           include_venice_system_prompt: false,
           strip_thinking_response: true,
@@ -102,13 +150,10 @@ export async function veniceChat(messages: ChatMessage[]): Promise<string> {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Venice chat error:', response.status, errorText);
-      
-      // Track consecutive errors
-      consecutiveErrors++;
-      lastErrorTime = Date.now();
-      
+
       if (response.status === 429) {
-        throw new Error('Too many messages. Please wait a moment before continuing.');
+        // After retries exhausted, give a friendlier message
+        throw new Error('Please wait a moment before sending another message. The AI is catching up.');
       } else if (response.status >= 500) {
         throw new Error('The service is temporarily unavailable. Please try again shortly.');
       } else {
@@ -116,18 +161,12 @@ export async function veniceChat(messages: ChatMessage[]): Promise<string> {
       }
     }
 
-    // Reset error counter on success
-    consecutiveErrors = 0;
-
     const data = await response.json();
     return data.choices?.[0]?.message?.content || "I'm having trouble responding right now. Could you try again?";
   } catch (error) {
-    // Track network/fetch errors too
-    if (error instanceof Error && !error.message.includes('wait')) {
-      consecutiveErrors++;
-      lastErrorTime = Date.now();
-    }
-    throw error;
+    // Re-throw known errors
+    if (error instanceof Error) throw error;
+    throw new Error('Network error. Please check your connection and try again.');
   }
 }
 
