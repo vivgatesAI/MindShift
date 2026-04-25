@@ -27,11 +27,10 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Clean the response of field markers for display
-    const cleanResponse = response.replace(/\[FIELD:[^\]]+\]/gi, '').trim();
-
+    // Pass the raw response to frontend — markers are stripped for display client-side
+    // This ensures extractFields can find them when saving records
     return NextResponse.json({
-      content: cleanResponse || "I'm here. Could you say that again?",
+      content: response || "I'm here. Could you say that again?",
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';

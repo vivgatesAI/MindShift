@@ -72,6 +72,8 @@ export default function MindShiftApp() {
   const [capturedPillars, setCapturedPillars] = useState<Record<string, string>>({});
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [inputHeight, setInputHeight] = useState('auto');
+  const [isSaving, setIsSaving] = useState(false);
+  const [savedRecordId, setSavedRecordId] = useState<string | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -156,15 +158,21 @@ export default function MindShiftApp() {
   const stopRecording = useCallback(() => { if (mediaRecorderRef.current && isRecording) { mediaRecorderRef.current.stop(); setIsRecording(false); } }, [isRecording]);
 
   const saveRecord = useCallback(async () => {
+    if (isSaving || savedRecordId) return;
+    setIsSaving(true);
     try {
       const res = await fetch('/api/records', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: messages.map(m => ({ role: m.role, content: m.content })) }) });
       const data = await res.json();
       if (data.record) {
+        setSavedRecordId(data.record.id);
         setRecords(prev => [normalizeRecord(data.record), ...prev]);
-        setMessages(prev => [...prev, { id: `s-${Date.now()}`, role: 'system', content: '✦ Saved to your journal.', timestamp: new Date() }]);
+        setMessages(prev => [...prev, { id: `s-${Date.now()}`, role: 'system', content: `✦ Saved to your journal. ${PILLARS.filter(p => data.record[p.key]).length}/5 pillars captured.`, timestamp: new Date() }]);
+      } else {
+        setError('Failed to save — no record returned.');
       }
     } catch { setError('Failed to save.'); }
-  }, [messages]);
+    finally { setIsSaving(false); }
+  }, [messages, isSaving, savedRecordId]);
 
   const deleteRecord = useCallback(async (id: string) => {
     try {
@@ -343,21 +351,25 @@ export default function MindShiftApp() {
           </div>
         </div>
 
-        {/* Save buttons - one for quick save, one for full record */}
+        {/* Save button */}
         {messages.length > 1 && !isLoading && (
-          <div className="px-4 pb-2 max-w-2xl mx-auto w-full space-y-2">
-            {/* Always show quick save after first exchange */}
-            <button onClick={saveRecord} className="w-full py-3 rounded-xl bg-sand text-bark font-medium text-sm hover:bg-sand/80 transition-colors flex items-center justify-center gap-2">
-              <BookOpen size={15} /> Quick Save
-            </button>
-            {/* Full save button when enough pillars captured */}
-            {filledPillars >= 3 && (
-              <button onClick={saveRecord} className="w-full py-3 rounded-xl bg-sage text-cream font-medium text-sm hover:bg-sage/90 transition-colors flex items-center justify-center gap-2">
-                <BookOpen size={15} /> Save Complete Record ({filledPillars}/5 pillars)
+          <div className="px-4 pb-2 max-w-2xl mx-auto w-full">
+            {savedRecordId ? (
+              <div className="flex gap-2">
+                <button onClick={() => setView('dashboard')} className="flex-1 py-3 rounded-xl bg-sage/15 text-sage font-medium text-sm hover:bg-sage/25 transition-colors flex items-center justify-center gap-2">
+                  <BarChart3 size={15} /> View in Journal
+                </button>
+                <button onClick={() => { setMessages([]); setCapturedPillars({}); setSavedRecordId(null); setMessages([{ id: 'welcome', role: 'assistant', content: "Hey. I'm here to listen.\n\nTell me what's been weighing on you — or just tap the mic and say it out loud. I'll walk you through it, one step at a time. What's going on?", timestamp: new Date() }]); }} className="flex-1 py-3 rounded-xl bg-sand text-bark font-medium text-sm hover:bg-sand/80 transition-colors flex items-center justify-center gap-2">
+                  New Session
+                </button>
+              </div>
+            ) : (
+              <button onClick={saveRecord} disabled={isSaving} className="w-full py-3 rounded-xl bg-bark text-cream font-medium text-sm hover:bg-bark/85 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-50">
+                <BookOpen size={15} /> {isSaving ? 'Saving...' : filledPillars >= 3 ? `Save Record (${filledPillars}/5 pillars)` : 'Save to Journal'}
               </button>
             )}
           </div>
-        )}
+        )
 
         <div className="border-t border-sand/60 bg-cream px-4 py-4">
           <div className="max-w-2xl mx-auto flex flex-col items-center gap-3">
@@ -406,7 +418,7 @@ export default function MindShiftApp() {
             </div>
             <span className="font-display text-lg text-bark">Journal</span>
           </div>
-          <button onClick={() => { setMessages([]); setCapturedPillars({}); setView('chat'); }}
+          <button onClick={() => { setMessages([]); setCapturedPillars({}); setSavedRecordId(null); setView('chat'); }}
             className="px-4 py-1.5 rounded-lg bg-bark text-cream text-sm font-medium hover:bg-bark/85 transition-colors">
             New Session
           </button>
@@ -436,7 +448,7 @@ export default function MindShiftApp() {
             <div className="text-center py-16">
               <div className="text-4xl mb-3">📝</div>
               <p className="text-warm text-sm mb-6">No records yet. Start a conversation to capture your first thought record.</p>
-              <button onClick={() => { setView('chat'); if (messages.length === 0) setMessages([{ id: 'welcome', role: 'assistant', content: "Hey. I'm here to listen.\n\nTell me what's been weighing on you — or just tap the mic and say it out loud. I'll walk you through it, one step at a time. What's going on?", timestamp: new Date() }]); }}
+              <button onClick={() => { setMessages([]); setCapturedPillars({}); setSavedRecordId(null); setView('chat'); setMessages([{ id: 'welcome', role: 'assistant', content: "Hey. I'm here to listen.\n\nTell me what's been weighing on you — or just tap the mic and say it out loud. I'll walk you through it, one step at a time. What's going on?", timestamp: new Date() }]); }}
                 className="px-6 py-3 rounded-xl bg-bark text-cream font-medium hover:bg-bark/85 transition-colors">
                 Start Talking
               </button>
